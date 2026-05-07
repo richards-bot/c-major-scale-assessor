@@ -42,6 +42,7 @@ export function estimatePitch(buffer, sampleRate, options = {}) {
   const minHz = options.minHz ?? MIN_VALID_PITCH_HZ;
   const maxHz = options.maxHz ?? MAX_VALID_PITCH_HZ;
   const minRms = options.minRms ?? MIN_RMS;
+  const clarityThreshold = options.clarityThreshold ?? 0.55;
 
   let rms = 0;
   for (let i = 0; i < buffer.length; i += 1) {
@@ -50,64 +51,64 @@ export function estimatePitch(buffer, sampleRate, options = {}) {
   rms = Math.sqrt(rms / buffer.length);
   if (rms < minRms) return null;
 
+  let start = 0;
+  let end = buffer.length - 1;
+  const trimThreshold = 0.03;
+
+  while (start < buffer.length / 2 && Math.abs(buffer[start]) < trimThreshold) start += 1;
+  while (end > start && Math.abs(buffer[end]) < trimThreshold) end -= 1;
+
+  const trimmed = buffer.slice(start, end + 1);
+  const size = trimmed.length;
+  if (size < 32) return null;
+
   const minLag = Math.max(2, Math.floor(sampleRate / maxHz));
-  const maxLag = Math.min(buffer.length - 2, Math.floor(sampleRate / minHz));
+  const maxLag = Math.min(size - 2, Math.floor(sampleRate / minHz));
+  if (maxLag <= minLag) return null;
+
+  let energy = 0;
+  for (let i = 0; i < size; i += 1) {
+    energy += trimmed[i] * trimmed[i];
+  }
+  if (!energy) return null;
+
+  const correlations = new Float32Array(maxLag + 2);
+  for (let lag = minLag; lag <= maxLag; lag += 1) {
+    let sum = 0;
+    for (let i = 0; i < size - lag; i += 1) {
+      sum += trimmed[i] * trimmed[i + lag];
+    }
+    correlations[lag] = sum;
+  }
+
+  let valley = minLag;
+  while (valley < maxLag - 1 && correlations[valley] > correlations[valley + 1]) {
+    valley += 1;
+  }
 
   let bestLag = -1;
-  let bestScore = -Infinity;
-
-  for (let lag = minLag; lag <= maxLag; lag += 1) {
-    let ac = 0;
-    let sumA = 0;
-    let sumB = 0;
-    const frameLength = buffer.length - lag;
-
-    for (let i = 0; i < frameLength; i += 1) {
-      const a = buffer[i];
-      const b = buffer[i + lag];
-      ac += a * b;
-      sumA += a * a;
-      sumB += b * b;
-    }
-
-    const denom = Math.sqrt(sumA * sumB);
-    if (!denom) continue;
-    const score = ac / denom;
-
-    if (score > bestScore) {
-      bestScore = score;
+  let bestCorrelation = -Infinity;
+  for (let lag = valley; lag <= maxLag; lag += 1) {
+    if (correlations[lag] > bestCorrelation) {
+      bestCorrelation = correlations[lag];
       bestLag = lag;
     }
   }
 
-  if (bestLag < 0 || bestScore < 0.82) return null;
+  if (bestLag < 0 || !Number.isFinite(bestCorrelation)) return null;
 
-  const correlationAt = (lag) => {
-    let ac = 0;
-    let sumA = 0;
-    let sumB = 0;
-    const frameLength = buffer.length - lag;
+  const normalizedClarity = bestCorrelation / energy;
+  if (normalizedClarity < clarityThreshold) return null;
 
-    for (let i = 0; i < frameLength; i += 1) {
-      const a = buffer[i];
-      const b = buffer[i + lag];
-      ac += a * b;
-      sumA += a * a;
-      sumB += b * b;
-    }
-
-    const denom = Math.sqrt(sumA * sumB);
-    return denom ? ac / denom : 0;
-  };
-
-  const left = correlationAt(bestLag - 1);
-  const center = correlationAt(bestLag);
-  const right = correlationAt(bestLag + 1);
+  const left = correlations[bestLag - 1] || correlations[bestLag];
+  const center = correlations[bestLag];
+  const right = correlations[bestLag + 1] || correlations[bestLag];
   const denom = left - 2 * center + right;
   const shift = denom === 0 ? 0 : 0.5 * (left - right) / denom;
-  const frequency = sampleRate / (bestLag + shift);
+  const lag = bestLag + shift;
+  const frequency = sampleRate / lag;
 
-  if (frequency < minHz || frequency > maxHz) return null;
+  if (!Number.isFinite(frequency) || frequency < minHz || frequency > maxHz) return null;
   return frequency;
 }
 

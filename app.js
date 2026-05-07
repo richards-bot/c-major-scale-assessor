@@ -32,6 +32,7 @@ const liveNeedleEl = document.getElementById('liveNeedle');
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const LIVE_HISTORY_SIZE = 5;
+const LIVE_MIN_RMS = 0.0025;
 
 let audioContext;
 let analyser;
@@ -254,7 +255,7 @@ async function ensureInputReady() {
 
   mediaSource = audioContext.createMediaStreamSource(mediaStream);
   analyser = audioContext.createAnalyser();
-  analyser.fftSize = 4096;
+  analyser.fftSize = 8192;
   analyser.smoothingTimeConstant = 0.05;
   analysisBuffer = new Float32Array(analyser.fftSize);
   mediaSource.connect(analyser);
@@ -274,7 +275,10 @@ function processAudioFrame() {
   }
   rms = Math.sqrt(rms / analysisBuffer.length);
 
-  const pitch = estimatePitch(analysisBuffer, audioContext.sampleRate, { minRms: MIN_RMS });
+  const pitch = estimatePitch(analysisBuffer, audioContext.sampleRate, {
+    minRms: isLiveTunerOn ? LIVE_MIN_RMS : MIN_RMS,
+    clarityThreshold: isLiveTunerOn ? 0.28 : 0.42,
+  });
   updateLiveIndicator(pitch, rms);
 
   if (isRecording) {
