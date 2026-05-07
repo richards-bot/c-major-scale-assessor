@@ -35,11 +35,42 @@
           <button id="startButton">Start assessment</button>
           <button id="stopButton" disabled>Stop</button>
           <button id="tuningButton" type="button">Play A4 tuning note (440 Hz)</button>
+          <button id="liveTunerButton" type="button">Start live tuner</button>
         </div>
         <p class="hint">
           Use headphones if you can, otherwise the metronome may bleed into the microphone and muddy the result.
         </p>
         <p id="status" class="status">Ready. The app expects: C4 D4 E4 F4 G4 A4 B4 C5, one note per beat.</p>
+      </section>
+
+      <section class="panel tuner-panel">
+        <div class="section-heading">
+          <h2>Live pitch monitor</h2>
+          <p>Use this before recording if you want a real-time tuner view.</p>
+        </div>
+        <div class="live-tuner-grid">
+          <div class="live-readout">
+            <p class="live-label">Detected note</p>
+            <div id="liveNote" class="live-note">—</div>
+            <p id="liveHz" class="live-secondary">— Hz</p>
+            <p id="liveCents" class="live-secondary">— cents</p>
+            <p id="liveState" class="live-state">Mic idle.</p>
+          </div>
+          <div class="live-meter-wrap">
+            <p class="live-label">Tuning meter</p>
+            <div class="tuner-meter">
+              <span class="tuner-mark tuner-mark-left">-50</span>
+              <span class="tuner-mark tuner-mark-center">0</span>
+              <span class="tuner-mark tuner-mark-right">+50</span>
+              <div class="tuner-track"></div>
+              <div id="liveNeedle" class="tuner-needle"></div>
+            </div>
+            <p class="live-label">Input level</p>
+            <div class="level-meter">
+              <div id="liveLevelFill" class="level-fill"></div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="panel score-panel">

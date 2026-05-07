@@ -10,6 +10,7 @@ Small proof-of-concept web app for assessing a one-octave C major scale against 
 - estimates pitch with autocorrelation
 - compares each note against the expected target pitch and beat placement
 - includes an A4 = 440 Hz tuning note
+- includes a live pitch monitor showing current note, frequency, cents offset, and input level
 - lets you play each target note directly from the UI
 - flags notes that are out of tune or out of time
 - lets you play back the recording and watch the note cards highlight in sequence
