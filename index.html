@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>C Major Scale Assessor</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <p class="eyebrow">Proof of concept</p>
+        <h1>C major scale assessor</h1>
+        <p class="intro">
+          Plays a metronome count-in, records the microphone, then scores each note of a one-octave C major scale for timing and intonation.
+        </p>
+      </section>
+
+      <section class="panel controls-panel">
+        <div class="control-row">
+          <label>
+            Tempo (BPM)
+            <input id="tempo" type="number" min="40" max="180" value="72" />
+          </label>
+          <label>
+            Pitch tolerance (cents)
+            <input id="pitchTolerance" type="number" min="5" max="80" value="25" />
+          </label>
+          <label>
+            Timing tolerance (ms)
+            <input id="timingTolerance" type="number" min="20" max="250" value="120" />
+          </label>
+        </div>
+        <div class="action-row">
+          <button id="startButton">Start assessment</button>
+          <button id="stopButton" disabled>Stop</button>
+        </div>
+        <p class="hint">
+          Use headphones if you can, otherwise the metronome may bleed into the microphone and muddy the result.
+        </p>
+        <p id="status" class="status">Ready. The app expects: C4 D4 E4 F4 G4 A4 B4 C5, one note per beat.</p>
+      </section>
+
+      <section class="panel score-panel">
+        <div class="section-heading">
+          <h2>Expected notes</h2>
+          <p>Each box turns green when it is in time and in tune, amber when only one dimension passes, and red when it misses.</p>
+        </div>
+        <div id="noteGrid" class="note-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="panel results-panel">
+        <div class="section-heading">
+          <h2>Result</h2>
+          <p id="summary">No recording yet.</p>
+        </div>
+        <audio id="playback" controls></audio>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
