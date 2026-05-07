@@ -1,27 +1,20 @@
-const SCALE = [
-  { name: 'C4', frequency: 261.63 },
-  { name: 'D4', frequency: 293.66 },
-  { name: 'E4', frequency: 329.63 },
-  { name: 'F4', frequency: 349.23 },
-  { name: 'G4', frequency: 392.0 },
-  { name: 'A4', frequency: 440.0 },
-  { name: 'B4', frequency: 493.88 },
-  { name: 'C5', frequency: 523.25 },
-];
-
-const COUNT_IN_BEATS = 4;
-const PRE_ROLL_SECONDS = 0.2;
-const POST_ROLL_SECONDS = 0.55;
-const MIN_RMS = 0.012;
-const MIN_VALID_PITCH_HZ = 70;
-const MAX_VALID_PITCH_HZ = 1200;
-const PITCH_WINDOW_CENTS = 180;
+import {
+  SCALE,
+  COUNT_IN_BEATS,
+  PRE_ROLL_SECONDS,
+  POST_ROLL_SECONDS,
+  MIN_RMS,
+  buildTimeline,
+  analyseFrames,
+  estimatePitch,
+} from './analysis-core.mjs';
 
 const tempoInput = document.getElementById('tempo');
 const pitchToleranceInput = document.getElementById('pitchTolerance');
 const timingToleranceInput = document.getElementById('timingTolerance');
 const startButton = document.getElementById('startButton');
 const stopButton = document.getElementById('stopButton');
+const tuningButton = document.getElementById('tuningButton');
 const statusEl = document.getElementById('status');
 const noteGrid = document.getElementById('noteGrid');
 const summaryEl = document.getElementById('summary');
@@ -41,32 +34,60 @@ let rafId = null;
 let stopTimeoutId = null;
 let isRecording = false;
 let playbackHighlightId = null;
+let activeToneStop = null;
+
+function setStatus(message) {
+  statusEl.textContent = message;
+}
+
+async function ensureAudioContext() {
+  audioContext = audioContext || new AudioContext();
+  if (audioContext.state !== 'running') {
+    await audioContext.resume();
+  }
+  return audioContext;
+}
+
+function formatPitchText(result) {
+  if (result.pitchErrorCents == null) return '—';
+  const direction = result.pitchErrorCents >= 0 ? 'sharp' : 'flat';
+  return `${Math.round(Math.abs(result.pitchErrorCents))} cents ${direction}`;
+}
+
+function formatTimingText(result) {
+  if (result.timingErrorMs == null) return '—';
+  const direction = result.timingErrorMs >= 0 ? 'late' : 'early';
+  return `${Math.round(Math.abs(result.timingErrorMs))} ms ${direction}`;
+}
 
 function renderExpectedNotes(results = []) {
   noteGrid.innerHTML = '';
+
   SCALE.forEach((note, index) => {
     const result = results[index] || {};
     const card = document.createElement('article');
     card.className = `note-card ${result.state || ''}`.trim();
     card.dataset.noteIndex = String(index);
 
-    const pitchText =
-      result.pitchErrorCents == null
-        ? '—'
-        : `${Math.round(result.pitchErrorCents)} cents ${result.pitchErrorCents >= 0 ? 'sharp' : 'flat'}`;
-    const timingText =
-      result.timingErrorMs == null
-        ? '—'
-        : `${Math.round(result.timingErrorMs)} ms ${result.timingErrorMs >= 0 ? 'late' : 'early'}`;
+    const detectedText = result.detectedFrequency
+      ? `${result.detectedNoteName || '—'} · ${result.detectedFrequency.toFixed(1)} Hz`
+      : '—';
 
     card.innerHTML = `
-      <h3>${index + 1}. ${note.name}</h3>
-      <p class="sub">Target ${note.frequency.toFixed(2)} Hz · one beat</p>
+      <div class="note-card-top">
+        <div>
+          <h3>${index + 1}. ${note.name}</h3>
+          <p class="sub">Target ${note.frequency.toFixed(2)} Hz · one beat</p>
+        </div>
+        <button class="note-play" data-frequency="${note.frequency}" data-note="${note.name}" type="button">Play tone</button>
+      </div>
       <dl>
         <dt>Pitch</dt>
-        <dd>${pitchText}</dd>
+        <dd>${formatPitchText(result)}</dd>
         <dt>Timing</dt>
-        <dd>${timingText}</dd>
+        <dd>${formatTimingText(result)}</dd>
+        <dt>Detected</dt>
+        <dd>${detectedText}</dd>
         <dt>Status</dt>
         <dd>${result.label || 'Waiting to record'}</dd>
       </dl>
@@ -76,112 +97,47 @@ function renderExpectedNotes(results = []) {
   });
 }
 
-function setStatus(message) {
-  statusEl.textContent = message;
-}
-
-function median(values) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
-}
-
-function centsOff(targetHz, actualHz) {
-  return 1200 * Math.log2(actualHz / targetHz);
-}
-
-function autoCorrelate(buffer, sampleRate) {
-  let rms = 0;
-  for (let i = 0; i < buffer.length; i += 1) {
-    rms += buffer[i] * buffer[i];
+function stopActiveTone() {
+  if (activeToneStop) {
+    activeToneStop();
+    activeToneStop = null;
   }
-  rms = Math.sqrt(rms / buffer.length);
-  if (rms < MIN_RMS) return null;
+}
 
-  let trimStart = 0;
-  let trimEnd = buffer.length - 1;
-  const threshold = 0.2;
+async function playTone(frequency, { seconds = 1.25, type = 'sine', gain = 0.14 } = {}) {
+  const ctx = await ensureAudioContext();
+  stopActiveTone();
 
-  while (trimStart < buffer.length / 2 && Math.abs(buffer[trimStart]) < threshold) trimStart += 1;
-  while (trimEnd > trimStart && Math.abs(buffer[trimEnd]) < threshold) trimEnd -= 1;
+  const now = ctx.currentTime;
+  const oscillator = ctx.createOscillator();
+  const envelope = ctx.createGain();
 
-  const trimmed = buffer.slice(trimStart, trimEnd + 1);
-  if (trimmed.length < 32) return null;
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, now);
 
-  const correlations = new Array(trimmed.length).fill(0);
-  for (let lag = 0; lag < trimmed.length; lag += 1) {
-    let sum = 0;
-    for (let i = 0; i < trimmed.length - lag; i += 1) {
-      sum += trimmed[i] * trimmed[i + lag];
+  envelope.gain.setValueAtTime(0.0001, now);
+  envelope.gain.exponentialRampToValueAtTime(gain, now + 0.02);
+  envelope.gain.exponentialRampToValueAtTime(gain * 0.9, now + Math.max(0.12, seconds - 0.12));
+  envelope.gain.exponentialRampToValueAtTime(0.0001, now + seconds);
+
+  oscillator.connect(envelope);
+  envelope.connect(ctx.destination);
+  oscillator.start(now);
+  oscillator.stop(now + seconds + 0.02);
+
+  activeToneStop = () => {
+    try {
+      oscillator.stop();
+    } catch {
+      // already stopped
     }
-    correlations[lag] = sum;
-  }
+    envelope.disconnect();
+    oscillator.disconnect();
+  };
 
-  let bestLag = -1;
-  let bestCorrelation = -Infinity;
-  for (let lag = 8; lag < trimmed.length / 2; lag += 1) {
-    if (correlations[lag] > bestCorrelation) {
-      bestCorrelation = correlations[lag];
-      bestLag = lag;
-    }
-  }
-
-  if (bestLag <= 0) return null;
-
-  const prev = correlations[bestLag - 1] || 0;
-  const current = correlations[bestLag] || 0;
-  const next = correlations[bestLag + 1] || 0;
-  const denom = prev - 2 * current + next;
-  const shift = denom === 0 ? 0 : 0.5 * (prev - next) / denom;
-  const frequency = sampleRate / (bestLag + shift);
-
-  if (frequency < MIN_VALID_PITCH_HZ || frequency > MAX_VALID_PITCH_HZ) return null;
-  return frequency;
-}
-
-function classifyNote(result, pitchTolerance, timingTolerance) {
-  if (!result.detected) {
-    return { state: 'missed', label: 'Missed / no stable note detected' };
-  }
-
-  const pitchOk = result.pitchErrorCents != null && Math.abs(result.pitchErrorCents) <= pitchTolerance;
-  const timingOk = result.timingErrorMs != null && Math.abs(result.timingErrorMs) <= timingTolerance;
-
-  if (pitchOk && timingOk) {
-    return { state: 'pass', label: 'In tune and in time' };
-  }
-
-  if (pitchOk || timingOk) {
-    return {
-      state: 'partial',
-      label: pitchOk ? 'In tune, timing off' : 'In time, tuning off',
-    };
-  }
-
-  return { state: 'fail', label: 'Out of tune and out of time' };
-}
-
-function buildTimeline(tempo) {
-  const beatDuration = 60 / tempo;
-  const performanceStart = PRE_ROLL_SECONDS + COUNT_IN_BEATS * beatDuration;
-
-  return SCALE.map((note, index) => ({
-    ...note,
-    index,
-    expectedStart: performanceStart + index * beatDuration,
-    expectedEnd: performanceStart + (index + 1) * beatDuration,
-    beatDuration,
-  }));
-}
-
-function stopTracks() {
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((track) => track.stop());
-  }
-  mediaStream = null;
+  oscillator.addEventListener('ended', () => {
+    if (activeToneStop) activeToneStop = null;
+  });
 }
 
 function clearRecordingState() {
@@ -195,6 +151,13 @@ function clearRecordingState() {
   renderExpectedNotes();
 }
 
+function stopTracks() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop());
+  }
+  mediaStream = null;
+}
+
 function scheduleMetronome(totalBeats, beatDuration) {
   const now = audioContext.currentTime;
   analysisStartedAt = now;
@@ -204,7 +167,7 @@ function scheduleMetronome(totalBeats, beatDuration) {
     const isCountIn = beat < COUNT_IN_BEATS;
     const isDownBeat = beat === COUNT_IN_BEATS;
     const frequency = isCountIn ? 1320 : isDownBeat ? 1180 : 920;
-    const gainAmount = isDownBeat ? 0.22 : 0.16;
+    const gainAmount = isDownBeat ? 0.2 : 0.13;
 
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
@@ -213,12 +176,12 @@ function scheduleMetronome(totalBeats, beatDuration) {
     oscillator.frequency.setValueAtTime(frequency, when);
     gainNode.gain.setValueAtTime(0.0001, when);
     gainNode.gain.exponentialRampToValueAtTime(gainAmount, when + 0.002);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, when + 0.06);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
 
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
     oscillator.start(when);
-    oscillator.stop(when + 0.07);
+    oscillator.stop(when + 0.06);
   }
 }
 
@@ -233,73 +196,25 @@ function collectAnalysisFrame() {
   }
   rms = Math.sqrt(rms / analysisBuffer.length);
 
-  const pitch = autoCorrelate(analysisBuffer, audioContext.sampleRate);
+  const pitch = estimatePitch(analysisBuffer, audioContext.sampleRate, { minRms: MIN_RMS });
   const relativeTime = audioContext.currentTime - analysisStartedAt;
 
-  analysisFrames.push({
-    time: relativeTime,
-    rms,
-    pitch,
-  });
-
+  analysisFrames.push({ time: relativeTime, rms, pitch });
   rafId = requestAnimationFrame(collectAnalysisFrame);
 }
 
 function analysePerformance() {
-  const pitchTolerance = Number(pitchToleranceInput.value);
-  const timingTolerance = Number(timingToleranceInput.value);
-  const beatDuration = expectedTimeline[0]?.beatDuration || 0.8;
-
-  noteResults = expectedTimeline.map((expected, index) => {
-    const windowStart = index === 0 ? expected.expectedStart - beatDuration * 0.25 : expected.expectedStart - beatDuration * 0.18;
-    const windowEnd = expected.expectedEnd + beatDuration * 0.22;
-    const frames = analysisFrames.filter(
-      (frame) => frame.time >= windowStart && frame.time <= windowEnd && frame.pitch != null && frame.rms >= MIN_RMS,
-    );
-
-    const closeFrames = frames.filter(
-      (frame) => Math.abs(centsOff(expected.frequency, frame.pitch)) <= PITCH_WINDOW_CENTS,
-    );
-
-    const onsetFrame = closeFrames.find((frame) => frame.time >= expected.expectedStart - beatDuration * 0.12);
-    const sustainFrames = closeFrames.filter(
-      (frame) => frame.time >= expected.expectedStart + beatDuration * 0.18 && frame.time <= expected.expectedEnd - beatDuration * 0.1,
-    );
-    const analysisFramesForPitch = sustainFrames.length >= 2 ? sustainFrames : closeFrames;
-    const centsValues = analysisFramesForPitch.map((frame) => centsOff(expected.frequency, frame.pitch));
-    const pitchErrorCents = median(centsValues);
-    const timingErrorMs = onsetFrame ? (onsetFrame.time - expected.expectedStart) * 1000 : null;
-    const detected = closeFrames.length > 1;
-
-    const baseResult = {
-      noteName: expected.name,
-      expectedStart: expected.expectedStart,
-      expectedEnd: expected.expectedEnd,
-      pitchErrorCents,
-      timingErrorMs,
-      detected,
-      voicedSamples: closeFrames.length,
-    };
-
-    return {
-      ...baseResult,
-      ...classifyNote(baseResult, pitchTolerance, timingTolerance),
-    };
+  const { noteResults: results, summary } = analyseFrames({
+    analysisFrames,
+    expectedTimeline,
+    pitchTolerance: Number(pitchToleranceInput.value),
+    timingTolerance: Number(timingToleranceInput.value),
   });
 
-  const passCount = noteResults.filter((result) => result.state === 'pass').length;
-  const partialCount = noteResults.filter((result) => result.state === 'partial').length;
-  const failCount = noteResults.length - passCount - partialCount;
-  const meanPitch = median(
-    noteResults.filter((result) => result.pitchErrorCents != null).map((result) => Math.abs(result.pitchErrorCents)),
-  );
-  const meanTiming = median(
-    noteResults.filter((result) => result.timingErrorMs != null).map((result) => Math.abs(result.timingErrorMs)),
-  );
-
-  summaryEl.textContent = `${passCount}/${noteResults.length} notes fully passed · ${partialCount} partial · ${failCount} failed/missed · median pitch error ${
-    meanPitch == null ? '—' : `${Math.round(meanPitch)} cents`
-  } · median timing error ${meanTiming == null ? '—' : `${Math.round(meanTiming)} ms`}.`;
+  noteResults = results;
+  summaryEl.textContent = `${summary.passCount}/${noteResults.length} notes fully passed · ${summary.partialCount} partial · ${summary.failCount} failed/missed · median pitch error ${
+    summary.medianPitchError == null ? '—' : `${Math.round(summary.medianPitchError)} cents`
+  } · median timing error ${summary.medianTimingError == null ? '—' : `${Math.round(summary.medianTimingError)} ms`}.`;
 
   renderExpectedNotes(noteResults);
 }
@@ -336,6 +251,7 @@ async function startAssessment() {
   stopButton.disabled = false;
 
   try {
+    await ensureAudioContext();
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -345,13 +261,10 @@ async function startAssessment() {
       video: false,
     });
 
-    audioContext = audioContext || new AudioContext();
-    await audioContext.resume();
-
     const source = audioContext.createMediaStreamSource(mediaStream);
     analyser = audioContext.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.08;
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.05;
     analysisBuffer = new Float32Array(analyser.fftSize);
     source.connect(analyser);
 
@@ -363,9 +276,7 @@ async function startAssessment() {
     });
 
     mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        mediaChunks.push(event.data);
-      }
+      if (event.data.size > 0) mediaChunks.push(event.data);
     };
 
     mediaRecorder.onstop = () => {
@@ -379,17 +290,16 @@ async function startAssessment() {
 
     const tempo = Number(tempoInput.value);
     expectedTimeline = buildTimeline(tempo);
-    renderExpectedNotes(
-      expectedTimeline.map(() => ({ state: '', label: 'Listening…', pitchErrorCents: null, timingErrorMs: null })),
-    );
+    renderExpectedNotes(expectedTimeline.map(() => ({ label: 'Listening…' })));
 
     const totalBeats = COUNT_IN_BEATS + SCALE.length;
-    const totalDurationSeconds = PRE_ROLL_SECONDS + totalBeats * (60 / tempo) + POST_ROLL_SECONDS;
+    const beatDuration = 60 / tempo;
+    const totalDurationSeconds = PRE_ROLL_SECONDS + totalBeats * beatDuration + POST_ROLL_SECONDS;
 
     setStatus(`Count-in starting… then play one note per beat: ${SCALE.map((note) => note.name).join(' ')}.`);
     mediaRecorder.start();
     isRecording = true;
-    scheduleMetronome(totalBeats, 60 / tempo);
+    scheduleMetronome(totalBeats, beatDuration);
     collectAnalysisFrame();
     stopTimeoutId = window.setTimeout(finishRecording, totalDurationSeconds * 1000);
   } catch (error) {
@@ -415,8 +325,7 @@ function updatePlaybackHighlight() {
   );
 
   if (currentIndex >= 0) {
-    const currentCard = document.querySelector(`[data-note-index="${currentIndex}"]`);
-    currentCard?.classList.add('current');
+    document.querySelector(`[data-note-index="${currentIndex}"]`)?.classList.add('current');
   }
 
   if (!playbackEl.paused && !playbackEl.ended) {
@@ -426,6 +335,20 @@ function updatePlaybackHighlight() {
 
 startButton.addEventListener('click', startAssessment);
 stopButton.addEventListener('click', finishRecording);
+tuningButton.addEventListener('click', async () => {
+  await playTone(440, { seconds: 2.5, type: 'sine', gain: 0.16 });
+  setStatus('Played A4 tuning note at 440 Hz.');
+});
+
+noteGrid.addEventListener('click', async (event) => {
+  const playButton = event.target.closest('.note-play');
+  if (!playButton) return;
+  const frequency = Number(playButton.dataset.frequency);
+  const noteName = playButton.dataset.note;
+  await playTone(frequency, { seconds: 1.15, type: 'sine', gain: 0.14 });
+  setStatus(`Played reference tone for ${noteName}.`);
+});
+
 playbackEl.addEventListener('play', () => {
   if (playbackHighlightId) cancelAnimationFrame(playbackHighlightId);
   updatePlaybackHighlight();

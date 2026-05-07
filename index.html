@@ -34,6 +34,7 @@
         <div class="action-row">
           <button id="startButton">Start assessment</button>
           <button id="stopButton" disabled>Stop</button>
+          <button id="tuningButton" type="button">Play A4 tuning note (440 Hz)</button>
         </div>
         <p class="hint">
           Use headphones if you can, otherwise the metronome may bleed into the microphone and muddy the result.
@@ -44,7 +45,7 @@
       <section class="panel score-panel">
         <div class="section-heading">
           <h2>Expected notes</h2>
-          <p>Each box turns green when it is in time and in tune, amber when only one dimension passes, and red when it misses.</p>
+          <p>Each box turns green when it is in time and in tune, amber when only one dimension passes, and red when it misses. You can also play each target note directly.</p>
         </div>
         <div id="noteGrid" class="note-grid" aria-live="polite"></div>
       </section>

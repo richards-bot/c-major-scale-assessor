@@ -108,6 +108,13 @@ button {
   color: #082f49;
 }
 
+#tuningButton,
+.note-play {
+  background: rgba(56, 189, 248, 0.18);
+  color: var(--text);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
 button[disabled] {
   cursor: not-allowed;
   opacity: 0.5;
@@ -161,6 +168,20 @@ button[disabled] {
 .note-card.missed {
   border-color: rgba(239, 68, 68, 0.6);
   background: rgba(127, 29, 29, 0.35);
+}
+
+.note-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.note-play {
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  white-space: nowrap;
 }
 
 .note-card h3 {
