@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>C Major Scale Assessor</title>
+    <title>Fixed Score Performance Assessor</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <section class="hero">
         <p class="eyebrow">Proof of concept</p>
-        <h1>C major scale assessor</h1>
+        <h1>Fixed score performance assessor</h1>
         <p class="intro">
-          Plays a metronome count-in, records the microphone, then scores each note of a one-octave C major scale for timing and intonation.
+          Shows one predefined treble-clef 4/4 score, gives a four-click count-in, records the microphone, then scores each note for timing and intonation.
         </p>
       </section>
 
@@ -38,9 +38,19 @@
           <button id="liveTunerButton" type="button">Start live tuner</button>
         </div>
         <p class="hint">
-          Use headphones if you can, otherwise the metronome may bleed into the microphone and muddy the result.
+          POC scope: one fixed monophonic score only. Use headphones if you can, otherwise the metronome may bleed into the microphone and muddy the result.
         </p>
-        <p id="status" class="status">Ready. The app expects: C4 D4 E4 F4 G4 A4 B4 C5, one note per beat.</p>
+        <p id="status" class="status">Ready. The app expects the displayed treble-clef 4/4 melody, including rhythmic variation and accidentals.</p>
+      </section>
+
+      <section class="panel score-notation-panel">
+        <div class="section-heading">
+          <h2>Score</h2>
+          <p>Treble clef, 4/4, fixed melody. After recording, notes with issues are annotated directly on the staff.</p>
+        </div>
+        <div class="score-wrap">
+          <svg id="scoreSvg" class="score-svg" viewBox="0 0 920 280" role="img" aria-label="Rendered fixed score"></svg>
+        </div>
       </section>
 
       <section class="panel tuner-panel">

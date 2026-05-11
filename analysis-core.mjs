@@ -1,12 +1,17 @@
 export const SCALE = [
-  { name: 'C4', frequency: 261.63 },
-  { name: 'D4', frequency: 293.66 },
-  { name: 'E4', frequency: 329.63 },
-  { name: 'F4', frequency: 349.23 },
-  { name: 'G4', frequency: 392.0 },
-  { name: 'A4', frequency: 440.0 },
-  { name: 'B4', frequency: 493.88 },
-  { name: 'C5', frequency: 523.25 },
+  { name: 'E4', midi: 64, frequency: 329.63, durationBeats: 1, measure: 1 },
+  { name: 'F#4', midi: 66, frequency: 369.99, durationBeats: 1, measure: 1 },
+  { name: 'G4', midi: 67, frequency: 392.0, durationBeats: 2, measure: 1 },
+  { name: 'A4', midi: 69, frequency: 440.0, durationBeats: 1, measure: 2 },
+  { name: 'G#4', midi: 68, frequency: 415.3, durationBeats: 1, measure: 2 },
+  { name: 'A4', midi: 69, frequency: 440.0, durationBeats: 1, measure: 2 },
+  { name: 'B4', midi: 71, frequency: 493.88, durationBeats: 1, measure: 2 },
+  { name: 'C5', midi: 72, frequency: 523.25, durationBeats: 2, measure: 3 },
+  { name: 'A4', midi: 69, frequency: 440.0, durationBeats: 1, measure: 3 },
+  { name: 'F#4', midi: 66, frequency: 369.99, durationBeats: 1, measure: 3 },
+  { name: 'E4', midi: 64, frequency: 329.63, durationBeats: 1, measure: 4 },
+  { name: 'D4', midi: 62, frequency: 293.66, durationBeats: 1, measure: 4 },
+  { name: 'C4', midi: 60, frequency: 261.63, durationBeats: 2, measure: 4 },
 ];
 
 export const COUNT_IN_BEATS = 4;
@@ -134,14 +139,24 @@ export function classifyNote(result, pitchTolerance, timingTolerance) {
 export function buildTimeline(tempo) {
   const beatDuration = 60 / tempo;
   const performanceStart = PRE_ROLL_SECONDS + COUNT_IN_BEATS * beatDuration;
+  let beatCursor = 0;
 
-  return SCALE.map((note, index) => ({
-    ...note,
-    index,
-    expectedStart: performanceStart + index * beatDuration,
-    expectedEnd: performanceStart + (index + 1) * beatDuration,
-    beatDuration,
-  }));
+  return SCALE.map((note, index) => {
+    const durationBeats = note.durationBeats ?? 1;
+    const timelineNote = {
+      ...note,
+      index,
+      durationBeats,
+      expectedStart: performanceStart + beatCursor * beatDuration,
+      expectedEnd: performanceStart + (beatCursor + durationBeats) * beatDuration,
+      beatDuration,
+      measure: note.measure ?? Math.floor(beatCursor / 4) + 1,
+      beatOffset: beatCursor,
+    };
+
+    beatCursor += durationBeats;
+    return timelineNote;
+  });
 }
 
 export function analyseFrames({ analysisFrames, expectedTimeline, pitchTolerance, timingTolerance, onsetRms = 0.009 }) {

@@ -232,6 +232,102 @@ button[disabled] {
   transition: width 70ms linear;
 }
 
+.score-wrap {
+  overflow-x: auto;
+}
+
+.score-svg {
+  width: 100%;
+  min-width: 820px;
+  height: auto;
+  display: block;
+}
+
+.score-bg {
+  fill: rgba(15, 23, 42, 0.45);
+  stroke: rgba(148, 163, 184, 0.12);
+}
+
+.staff-line,
+.ledger-line,
+.bar-line,
+.stem {
+  stroke: rgba(226, 232, 240, 0.88);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.score-clef,
+.score-time,
+.score-note-label,
+.score-annotation {
+  fill: var(--text);
+  text-anchor: middle;
+}
+
+.score-clef {
+  font-size: 4rem;
+}
+
+.score-time {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.score-note-label {
+  font-size: 0.88rem;
+  fill: var(--muted);
+}
+
+.notehead {
+  stroke: rgba(15, 23, 42, 0.8);
+  stroke-width: 1.5;
+}
+
+.notehead-filled {
+  fill: var(--text);
+}
+
+.notehead-open {
+  fill: rgba(226, 232, 240, 0.12);
+}
+
+.score-accidental {
+  fill: var(--text);
+  font-size: 1.25rem;
+  text-anchor: middle;
+}
+
+.score-annotation {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.score-note {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.score-note.current .notehead {
+  fill: var(--current);
+  filter: drop-shadow(0 0 10px rgba(167, 139, 250, 0.55));
+}
+
+.score-note.partial .notehead,
+.score-annotation.partial {
+  fill: var(--warn);
+}
+
+.score-note.fail .notehead,
+.score-note.missed .notehead,
+.score-annotation.fail,
+.score-annotation.missed {
+  fill: var(--bad);
+}
+
+.score-note.pass .notehead {
+  fill: var(--ok);
+}
+
 .note-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

@@ -27,5 +27,5 @@ createServer((req, res) => {
   res.writeHead(200, { 'content-type': mimeTypes[extname(filePath)] || 'application/octet-stream' });
   createReadStream(filePath).pipe(res);
 }).listen(port, () => {
-  console.log(`C major scale assessor running at http://localhost:${port}`);
+  console.log(`Fixed score performance assessor running at http://localhost:${port}`);
 });

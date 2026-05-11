@@ -20,6 +20,7 @@ const stopButton = document.getElementById('stopButton');
 const tuningButton = document.getElementById('tuningButton');
 const liveTunerButton = document.getElementById('liveTunerButton');
 const statusEl = document.getElementById('status');
+const scoreSvg = document.getElementById('scoreSvg');
 const noteGrid = document.getElementById('noteGrid');
 const summaryEl = document.getElementById('summary');
 const playbackEl = document.getElementById('playback');
@@ -31,8 +32,10 @@ const liveLevelFillEl = document.getElementById('liveLevelFill');
 const liveNeedleEl = document.getElementById('liveNeedle');
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const DIATONIC_ORDER = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const LIVE_HISTORY_SIZE = 5;
 const LIVE_MIN_RMS = 0.0025;
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 let audioContext;
 let analyser;
@@ -95,6 +98,144 @@ function getNearestPitchInfo(frequency) {
   };
 }
 
+function parseNoteName(noteName) {
+  const match = /^([A-G])([#b]?)(\d)$/.exec(noteName);
+  if (!match) return null;
+  return {
+    letter: match[1],
+    accidental: match[2] || '',
+    octave: Number(match[3]),
+  };
+}
+
+function getStaffStep(noteName) {
+  const parsed = parseNoteName(noteName);
+  if (!parsed) return 0;
+  const referenceIndex = DIATONIC_ORDER.indexOf('E') + 4 * 7;
+  const noteIndex = DIATONIC_ORDER.indexOf(parsed.letter) + parsed.octave * 7;
+  return noteIndex - referenceIndex;
+}
+
+function getScoreAnnotation(result) {
+  if (!result?.state || result.state === 'pass') return [];
+  if (!result.detected) return ['Missed'];
+
+  const notes = [];
+  if (result.pitchErrorCents != null && Math.abs(result.pitchErrorCents) > Number(pitchToleranceInput.value)) {
+    notes.push(`${result.pitchErrorCents > 0 ? 'Sharp' : 'Flat'} ${Math.round(Math.abs(result.pitchErrorCents))}c`);
+  }
+  if (result.timingErrorMs != null && Math.abs(result.timingErrorMs) > Number(timingToleranceInput.value)) {
+    notes.push(`${result.timingErrorMs > 0 ? 'Late' : 'Early'} ${Math.round(Math.abs(result.timingErrorMs))}ms`);
+  }
+  return notes;
+}
+
+function formatDurationLabel(durationBeats = 1) {
+  if (durationBeats === 0.5) return 'eighth note';
+  if (durationBeats === 1) return 'quarter note';
+  if (durationBeats === 1.5) return 'dotted quarter';
+  if (durationBeats === 2) return 'half note';
+  if (durationBeats === 4) return 'whole note';
+  return `${durationBeats} beats`;
+}
+
+function createSvgNode(tag, attributes = {}, textContent = null) {
+  const node = document.createElementNS(SVG_NS, tag);
+  Object.entries(attributes).forEach(([key, value]) => {
+    if (value != null) node.setAttribute(key, String(value));
+  });
+  if (textContent != null) node.textContent = textContent;
+  return node;
+}
+
+function renderScore(results = []) {
+  scoreSvg.innerHTML = '';
+  const scoreNotes = expectedTimeline.length ? expectedTimeline : SCALE;
+
+  const width = 920;
+  const height = 280;
+  const left = 92;
+  const right = 860;
+  const top = 72;
+  const lineGap = 22;
+  const bottom = top + lineGap * 4;
+  const totalBeats = scoreNotes.reduce((sum, note) => sum + (note.durationBeats ?? 1), 0);
+  const innerWidth = right - left;
+  const beatWidth = innerWidth / totalBeats;
+
+  scoreSvg.appendChild(createSvgNode('rect', { x: 0, y: 0, width, height, rx: 24, class: 'score-bg' }));
+
+  for (let line = 0; line < 5; line += 1) {
+    const y = top + line * lineGap;
+    scoreSvg.appendChild(createSvgNode('line', { x1: left - 18, y1: y, x2: right + 18, y2: y, class: 'staff-line' }));
+  }
+
+  scoreSvg.appendChild(createSvgNode('text', { x: 42, y: top + lineGap * 3.2, class: 'score-clef' }, '𝄞'));
+  scoreSvg.appendChild(createSvgNode('text', { x: 74, y: top + lineGap * 1.55, class: 'score-time' }, '4'));
+  scoreSvg.appendChild(createSvgNode('text', { x: 74, y: top + lineGap * 3.55, class: 'score-time' }, '4'));
+
+  for (let beat = 4; beat <= totalBeats; beat += 4) {
+    const x = left + beat * beatWidth;
+    scoreSvg.appendChild(createSvgNode('line', { x1: x, y1: top - 8, x2: x, y2: bottom + 8, class: 'bar-line' }));
+  }
+
+  let beatCursor = 0;
+  scoreNotes.forEach((note, index) => {
+    const step = getStaffStep(note.name);
+    const durationBeats = note.durationBeats ?? 1;
+    const x = left + (beatCursor + durationBeats / 2) * beatWidth;
+    const y = bottom - step * (lineGap / 2);
+    const result = results[index] || {};
+    const annotationLines = getScoreAnnotation(result);
+    const parsed = parseNoteName(note.name);
+    const group = createSvgNode('g', {
+      class: `score-note ${result.state || 'pending'}`,
+      'data-note-index': index,
+    });
+
+    group.appendChild(
+      createSvgNode('ellipse', {
+        cx: x,
+        cy: y,
+        rx: 11,
+        ry: 8,
+        class: `notehead ${durationBeats >= 2 ? 'notehead-open' : 'notehead-filled'}`,
+      }),
+    );
+    group.appendChild(createSvgNode('line', { x1: x + 10, y1: y, x2: x + 10, y2: y - 44, class: 'stem' }));
+
+    if (parsed?.accidental) {
+      group.appendChild(createSvgNode('text', { x: x - 24, y: y + 6, class: 'score-accidental' }, parsed.accidental === 'b' ? '♭' : '♯'));
+    }
+
+    if (step <= -1) {
+      for (let ledgerStep = -2; ledgerStep >= step; ledgerStep -= 2) {
+        const ledgerY = bottom - ledgerStep * (lineGap / 2);
+        group.appendChild(createSvgNode('line', { x1: x - 18, y1: ledgerY, x2: x + 18, y2: ledgerY, class: 'ledger-line' }));
+      }
+    }
+
+    group.appendChild(createSvgNode('text', { x, y: bottom + 34, class: 'score-note-label' }, note.name));
+
+    annotationLines.forEach((line, annotationIndex) => {
+      group.appendChild(
+        createSvgNode(
+          'text',
+          {
+            x,
+            y: top - 18 - annotationIndex * 18,
+            class: `score-annotation ${result.state || 'pending'}`,
+          },
+          line,
+        ),
+      );
+    });
+
+    scoreSvg.appendChild(group);
+    beatCursor += durationBeats;
+  });
+}
+
 function updateLiveIndicator(pitch, rms) {
   const levelPercent = Math.max(2, Math.min(100, (rms / 0.05) * 100));
   liveLevelFillEl.style.width = `${levelPercent}%`;
@@ -145,7 +286,7 @@ function renderExpectedNotes(results = []) {
       <div class="note-card-top">
         <div>
           <h3>${index + 1}. ${note.name}</h3>
-          <p class="sub">Target ${note.frequency.toFixed(2)} Hz · one beat</p>
+          <p class="sub">Target ${note.frequency.toFixed(2)} Hz · ${formatDurationLabel(note.durationBeats)}</p>
         </div>
         <button class="note-play" data-frequency="${note.frequency}" data-note="${note.name}" type="button">Play tone</button>
       </div>
@@ -308,6 +449,7 @@ function clearRecordingState() {
   playbackEl.load();
   summaryEl.textContent = 'No recording yet.';
   renderExpectedNotes();
+  renderScore();
 }
 
 function scheduleMetronome(totalBeats, beatDuration) {
@@ -351,6 +493,7 @@ function analysePerformance() {
   } · median timing error ${summary.medianTimingError == null ? '—' : `${Math.round(summary.medianTimingError)} ms`}.`;
 
   renderExpectedNotes(noteResults);
+  renderScore(noteResults);
 }
 
 function finishRecording() {
@@ -406,13 +549,14 @@ async function startAssessment() {
     expectedTimeline = buildTimeline(tempo);
     renderExpectedNotes(expectedTimeline.map(() => ({ label: 'Listening…' })));
 
-    const totalBeats = COUNT_IN_BEATS + SCALE.length;
+    const scoreBeats = expectedTimeline.reduce((sum, note) => sum + (note.durationBeats ?? 1), 0);
+    const totalBeats = COUNT_IN_BEATS + scoreBeats;
     const beatDuration = 60 / tempo;
     const totalDurationSeconds = PRE_ROLL_SECONDS + totalBeats * beatDuration + POST_ROLL_SECONDS;
 
     analysisFrames = [];
     livePitchHistory = [];
-    setStatus(`Count-in starting… then play one note per beat: ${SCALE.map((note) => note.name).join(' ')}.`);
+    setStatus(`Count-in starting… then play the displayed 4/4 melody in time.`);
     mediaRecorder.start();
     isRecording = true;
     scheduleMetronome(totalBeats, beatDuration);
@@ -453,6 +597,7 @@ async function toggleLiveTuner() {
 
 function clearCurrentHighlight() {
   document.querySelectorAll('.note-card.current').forEach((card) => card.classList.remove('current'));
+  document.querySelectorAll('.score-note.current').forEach((note) => note.classList.remove('current'));
 }
 
 function updatePlaybackHighlight() {
@@ -465,7 +610,8 @@ function updatePlaybackHighlight() {
   );
 
   if (currentIndex >= 0) {
-    document.querySelector(`[data-note-index="${currentIndex}"]`)?.classList.add('current');
+    document.querySelector(`.note-card[data-note-index="${currentIndex}"]`)?.classList.add('current');
+    document.querySelector(`.score-note[data-note-index="${currentIndex}"]`)?.classList.add('current');
   }
 
   if (!playbackEl.paused && !playbackEl.ended) {
@@ -505,3 +651,4 @@ playbackEl.addEventListener('ended', () => {
 
 updateLiveIndicator(null, 0);
 renderExpectedNotes();
+renderScore();
