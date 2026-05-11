@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "c_major_scale_assessor",
+  "project_id": "049362ca-82e2-41e0-b965-4bcf500ece13"
+}
